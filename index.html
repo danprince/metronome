@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf8">
+  <title>Metronome</title>
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⏰</text></svg>">
+</head>
+
+<body class="paused"
+  style="font-family: system-ui;display: flex;flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0">
+  <main style="text-align: center;">
+    <h1 id="bpm" style="font-size: 64pt; margin: 0"></h1>
+    <h2 id="hint" style="letter-spacing: 3pt; margin: 0;">START</h2>
+  </main>
+</body>
+
+<script type="module">
+  let ctx = new AudioContext({});
+  let gain = new GainNode(ctx);
+  gain.connect(ctx.destination);
+
+  let beatsPerMinute =
+    // Parse the BPM from the path
+    parseInt(location.pathname.slice(1)) ||
+    // Or from the hash
+    parseInt(location.hash.slice(1)) ||
+    // Or just default to good ol' 120
+    120;
+
+  let secondsPerBeat = 60 / beatsPerMinute;
+
+  document.getElementById("bpm").textContent = beatsPerMinute;
+
+  let response = await fetch("click.wav");
+  let arrayBuffer = await response.arrayBuffer();
+  let audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+
+  // Here's the only interesting bit of programming. The browser's timeout and
+  // interval functions are not precise enough to use them for scheduling
+  // audio, however the Web Audio API _can_ schedule sounds for exact times.
+  //
+  // This app is a metronome and it's designed to go forever, but we can't
+  // schedule an infinite number of audio buffer sources to start, so instead we
+  // schedule just 100 of them, then set a timeout that will fire before we
+  // finish playing those 100, so that we can schedule the next 100 and so on.
+
+  let schedulerTime = ctx.currentTime;
+
+  function schedule() {
+    let beats = 100;
+
+    for (let i = 0; i < beats; i++) {
+      let source = new AudioBufferSourceNode(ctx, {
+        buffer: audioBuffer,
+      });
+
+      let t = schedulerTime + i * secondsPerBeat;
+      source.connect(gain);
+      source.start(t);
+    }
+
+    // Advance the scheduler's time ready for the next block
+    schedulerTime += beats * secondsPerBeat;
+
+    // Set a timeout for scheduling the next set of beats but
+    // run it 100ms before we need the next beats to be scheduled.
+    setTimeout(schedule, beats * secondsPerBeat * 1000 - 100);
+  }
+
+  function pause(event) {
+    if (event instanceof MouseEvent || (event instanceof KeyboardEvent && event.key === " ")) {
+      document.body.classList.toggle("paused");
+      gain.gain.value = gain.gain.value === 0 ? 1 : 0;
+    }
+  }
+
+  function init() {
+    schedule();
+    document.body.classList.remove("paused");
+    document.getElementById("hint").textContent = "BPM";
+    onclick = onkeydown = pause;
+  }
+
+  onclick = onkeydown = init;
+</script>
+
+<style>
+  .paused main {
+    opacity: 0.5;
+    cursor: pointer;
+  }
+
+  .paused main:hover {
+    opacity: 1;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    body {
+      background-color: black;
+      color: white;
+    }
+  }
+</style>
+
+</html>
